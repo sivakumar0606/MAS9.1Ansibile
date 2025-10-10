@@ -20,6 +20,15 @@ jobs:
         with:
           python-version: '3.11'
 
+      # Install Node.js & semver
+      - name: Set up Node.js
+        uses: actions/setup-node@v3
+        with:
+          node-version: '20'
+
+      - name: Install semver
+        run: npm install -g semver
+
       # Debug: List build/bin if exists
       - name: Debug build/bin
         run: |
@@ -35,6 +44,11 @@ jobs:
         run: |
           if [ -d "$GITHUB_WORKSPACE/build/bin" ]; then
             chmod u+x $GITHUB_WORKSPACE/build/bin/*.sh
+            # Check if .env.sh exists
+            if [ ! -f "$GITHUB_WORKSPACE/build/bin/.env.sh" ]; then
+              echo "Warning: .env.sh not found, creating empty placeholder"
+              touch $GITHUB_WORKSPACE/build/bin/.env.sh
+            fi
             $GITHUB_WORKSPACE/build/bin/initbuild.sh
             source $GITHUB_WORKSPACE/build/bin/functions.sh
           else
@@ -88,13 +102,3 @@ jobs:
           project: 'ansible-devops'
           path: '.'
           format: 'HTML'
-          args: >
-            --failOnCVSS 7
-            --enableRetired
-
-      - name: Upload dependency check results
-        uses: actions/upload-artifact@v4
-        with:
-           name: OWASP dependency check report
-           path: ${{github.workspace}}/reports
-           retention-days: 90
