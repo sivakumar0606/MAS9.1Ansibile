@@ -36,7 +36,7 @@ jobs:
           if [ -d "$GITHUB_WORKSPACE/build/bin" ]; then
             chmod u+x $GITHUB_WORKSPACE/build/bin/*.sh
             $GITHUB_WORKSPACE/build/bin/initbuild.sh
-            source $GITHUB_WORKSPACE/build/bin/.functions.sh
+            source $GITHUB_WORKSPACE/build/bin/functions.sh
           else
             echo "Skipping build system initialization (build/bin missing)"
           fi
