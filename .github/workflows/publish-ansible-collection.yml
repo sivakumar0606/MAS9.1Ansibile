@@ -29,20 +29,27 @@ jobs:
       - name: Install semver
         run: npm install -g semver
 
-      # 4️⃣ Set default VERSION if not defined
+      # 4️⃣ Add npm global bin to PATH so semver works
+      - name: Add npm global binaries to PATH
+        run: echo "$HOME/.npm-global/bin" >> $GITHUB_PATH
+
+      # 5️⃣ Set default VERSION if not defined
       - name: Set default VERSION
         run: echo "VERSION=1.0.0" >> $GITHUB_ENV
 
-      # 5️⃣ Ensure env.sh exists
-      - name: Ensure env.sh exists
+      # 6️⃣ Ensure .env.sh exists
+      - name: Ensure .env.sh exists
         run: |
-          if [ ! -f "$GITHUB_WORKSPACE/build/bin/env.sh" ]; then
-            echo "Creating empty env.sh placeholder"
-            mkdir -p "$GITHUB_WORKSPACE/build/bin"
-            touch "$GITHUB_WORKSPACE/build/bin/env.sh"
+          mkdir -p "$GITHUB_WORKSPACE/build/bin"
+          if [ ! -f "$GITHUB_WORKSPACE/build/bin/.env.sh" ]; then
+            if [ -f "$GITHUB_WORKSPACE/build/bin/env.sh" ]; then
+              mv "$GITHUB_WORKSPACE/build/bin/env.sh" "$GITHUB_WORKSPACE/build/bin/.env.sh"
+            else
+              touch "$GITHUB_WORKSPACE/build/bin/.env.sh"
+            fi
           fi
 
-      # 6️⃣ Debug: list build/bin
+      # 7️⃣ Debug: list build/bin files
       - name: Debug build/bin
         run: |
           echo "Listing build/bin files..."
@@ -52,7 +59,7 @@ jobs:
             echo "Directory build/bin does not exist!"
           fi
 
-      # 7️⃣ Initialise build system (skip if missing)
+      # 8️⃣ Initialise build system (skip if folder missing)
       - name: Initialise the build system
         run: |
           if [ -d "$GITHUB_WORKSPACE/build/bin" ]; then
@@ -64,7 +71,7 @@ jobs:
           fi
           python -m pip install -q ansible==2.10.3 yamllint
 
-      # 8️⃣ Validate collection lint
+      # 9️⃣ Validate collection lint
       - name: Validate Ansible collection lint
         run: |
           if [ -f "$GITHUB_WORKSPACE/yamllint.yaml" ]; then
@@ -73,7 +80,7 @@ jobs:
             echo "yamllint.yaml not found, skipping lint"
           fi
 
-      # 9️⃣ Build collection (skip if missing)
+      # 🔟 Build collection (skip if missing)
       - name: Build the Ansible collection
         run: |
           if [ -f "$GITHUB_WORKSPACE/build/bin/build-collection.sh" ]; then
@@ -82,7 +89,7 @@ jobs:
             echo "build-collection.sh missing, skipping build"
           fi
 
-      # 🔟 Upload collection to GitHub release
+      # 1️⃣1️⃣ Upload collection to GitHub release
       - name: Upload Ansible Collection
         if: success()
         uses: svenstaro/upload-release-action@v2
@@ -93,7 +100,7 @@ jobs:
           tag: ${{ github.ref }}
           overwrite: true
 
-      # 1️⃣1️⃣ Publish to Ansible Galaxy (requires ANSIBLE_GALAXY_TOKEN)
+      # 1️⃣2️⃣ Publish to Ansible Galaxy
       - name: Publish Collection
         if: success()
         run: |
@@ -103,7 +110,7 @@ jobs:
             echo "Collection tar.gz not found, skipping publish"
           fi
 
-      # 1️⃣2️⃣ Optional: Dependency check
+      # 1️⃣3️⃣ Optional: Dependency check
       - name: Perform dependency check
         uses: dependency-check/Dependency-Check_Action@main
         with:
@@ -111,7 +118,7 @@ jobs:
           path: '.'
           format: 'HTML'
 
-      # 1️⃣3️⃣ Upload dependency check results
+      # 1️⃣4️⃣ Upload dependency check results
       - name: Upload dependency check results
         uses: actions/upload-artifact@v4
         with:
