@@ -1,0 +1,107 @@
+---
+- name: "cis : Ensure IBMCloud CIS is installed"
+  ansible.builtin.shell: |
+    ibmcloud plugin install cis -f
+
+- name: "cis : Lookup for Cluster-info Config Map"
+  kubernetes.core.k8s_info:
+    api_version: v1
+    name: cluster-info
+    namespace: kube-system
+    kind: ConfigMap
+  register: _cluster_details_result
+
+- name: "cis : Define default CIS service name"
+  set_fact:
+    cis_service_name: "{{ _cluster_details_result.resources[0].data.cluster_name }}-cis-{{mas_instance_id}}"
+  when:
+    - cis_service_name is not defined or cis_service_name == ''
+
+- name: "cis : debug cis_service_name"
+  debug:
+    msg: "CIS Service Name ......... {{ cis_service_name }}"
+
+- name: "Pause for 2 minutes before continuing..."
+  pause:
+    minutes: 2
+
+- name: "cis : Lookup for CIS Service Domains"
+  ansible.builtin.shell: |
+    ibmcloud cis domains -i {{ cis_service_name }} -o json
+  register: _cis_domains_result
+
+- set_fact:
+    _cis_domain_id: "{{(_cis_domains_result.stdout | from_json)[0].id}}"
+
+- name: CIS domain id
+  debug:
+    var: _cis_domain_id
+
+- name: "Pause for 2 minutes before continuing..."
+  pause:
+    minutes: 2
+
+- name: "cis : Lookup for cis certificates"
+  ansible.builtin.shell: |
+    ibmcloud cis certificates {{ _cis_domain_id }} -i {{ cis_service_name }} -o json
+  register: _cis_certificates
+
+- name: "cis : exclude certs not for {{ mas_instance_id }}"
+  set_fact:
+    dedicated_list: "{{ _cis_certificates.stdout | from_json | selectattr('hosts','search',mas_instance_id) }}"
+
+- name: "cis : exclude certs non advanced certificates"
+  set_fact:
+    dedicated_list: "{{ dedicated_list | selectattr('type', 'equalto', 'advanced') }}"
+
+- name: "cis : Verify if is there a dedicated certificate already"
+  set_fact:
+    hasDedicated: "{{ dedicated_list | length > 0 }}"
+
+- name: "cis : Lookup the dedicated certificate id"
+  set_fact:
+    dedicatedId: "{{ dedicated_list[0].id }}"
+  when:
+    - hasDedicated
+
+- name: Debug dedicated certificates
+  debug:
+    msg:
+      - "hasDedicated: {{ hasDedicated }}"
+      - "dedicatedId: {{ dedicatedId | default('N/A', True )}}"
+
+- name: "Pause for 2 minutes before continuing..."
+  pause:
+    minutes: 2
+
+- name: "cis : Check if we need to re-order certificates due to install change"
+  when: not override_edge_certs and hasDedicated
+  block:
+    - name: "cis : run cis_edge_cert_entries module to determine if we need to reorder due to entries not present"
+      ibm.mas_devops.cis_edge_cert_entries:
+        cis_crn: "{{ cis_crn }}"
+        ibmcloud_apikey: "{{ cis_apikey }}"
+        edge_cert_entries: "{{ edge_cert_routes }}"
+        mas_instance_id: "{{ mas_instance_id }}"
+      register: edge_cert_output
+
+    - name: "cis : dump output"
+      debug:
+        msg: '{{ edge_cert_output }}'
+
+- name: "cis : Delete Existent Advanced Edge Certificate, if set to override or we need to reorder"
+  ansible.builtin.shell: |
+    ibmcloud cis certificate-delete {{ _cis_domain_id }}  {{ dedicatedId }} -i {{ cis_service_name }} -f
+  when: hasDedicated and (override_edge_certs or (edge_cert_output is defined and edge_cert_output["reorder"]))
+  register: _deleted_certificate
+
+- name: "Pause for 2 minutes before continuing..."
+  pause:
+    minutes: 2
+
+- name: "cis : Order certificate if there no dedicated yet or we just deleted them"
+  ansible.builtin.shell: |
+    ibmcloud cis certificate-order {{ _cis_domain_id }} --hostnames {{ item|join(',') }} -i {{ cis_service_name }}
+  loop: "{{ edge_cert_routes | batch(50) | list }}"
+  when:
+    - not hasDedicated or _deleted_certificate["changed"]

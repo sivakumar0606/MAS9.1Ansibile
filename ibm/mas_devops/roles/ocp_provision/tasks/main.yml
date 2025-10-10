@@ -1,0 +1,47 @@
+---
+# 1. Check for undefined properties that do not have a default
+# -----------------------------------------------------------------------------
+- name: "Fail if cluster name & type is not provided"
+  assert:
+    that:
+      - cluster_type is defined and cluster_type != ""
+      - cluster_name is defined and cluster_name != ""
+    fail_msg: "cluster_type and cluster_name properties are required"
+
+- name: "Backwards compatability for 'quickburn' cluster type"
+  when: cluster_type == "quickburn"
+  set_fact:
+    cluster_type: "fyre"
+
+- name: "Fail if cluster type is not supported"
+  assert:
+    that: cluster_type is in supported_cluster_types
+    fail_msg: "cluster_type '{{ cluster_type }}' property is not supported by this role"
+
+- name: "Fail if no OCP version is provided"
+  assert:
+    that: ocp_version is defined and ocp_version != ""
+    fail_msg: "ocp_version is required"
+
+- name: "Select ocp version based on day of the week"
+  when: ocp_version == "rotate"
+  set_fact:
+    ocp_version: "{{ rotate_ocp_version[ansible_date_time['weekday']] ~ ('_openshift' if cluster_type == 'roks' else '') }}"
+  vars:
+    rotate_ocp_version:
+      Monday: 4.18
+      Tuesday: 4.17
+      Wednesday: 4.16
+      Thursday: 4.15
+      Friday: 4.18
+      Saturday: 4.19
+      Sunday: 4.16
+
+- name: "Set default OCP version"
+  when: ocp_version == "default"
+  set_fact:
+    ocp_version: "{{ default_ocp_version ~ ('_openshift' if cluster_type == 'roks' else '') }}"
+
+# 2. Run the provision
+# -----------------------------------------------------------------------------
+- include_tasks: "tasks/providers/{{ cluster_type }}/provision_{{ cluster_type }}.yml"

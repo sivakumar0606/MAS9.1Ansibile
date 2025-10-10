@@ -1,0 +1,244 @@
+---
+# 1. Check for undefined properties that do not have a default
+# -----------------------------------------------------------------------------
+- name: "Assert that mas_instance_id is defined"
+  assert:
+    that:
+      - mas_instance_id is defined and mas_instance_id != ""
+    fail_msg: "mas_instance_id is required"
+
+
+# 2. Load variables
+# -----------------------------------------------------------------------------
+- name: "Load application compatibility matrix"
+  include_vars: "{{ role_path }}/../../common_vars/compatibility_matrix.yml"
+
+
+# 3. Determine upgrade target
+# -----------------------------------------------------------------------------
+# Default mas_channel based on the current version of the
+# installed MAS core if not provided by the user specifically
+- name: "Get subscription for ibm-mas"
+  kubernetes.core.k8s_info:
+    api_version: operators.coreos.com/v1alpha1
+    kind: Subscription
+    namespace: "{{ mas_namespace }}"
+    label_selectors:
+      - "operators.coreos.com/ibm-mas.{{ mas_namespace }}"
+  register: core_sub_info
+
+- name: "Set default upgrade target based on installed version of MAS core"
+  when:
+    - mas_channel is not defined or mas_channel == ""
+    - core_sub_info.resources[0].spec.channel in upgrade_path
+  set_fact:
+    target_mas_channel: "{{ upgrade_path[core_sub_info.resources[0].spec.channel] }}"
+
+- name: "Set upgrade target explicitly"
+  when:
+    - mas_channel is defined and mas_channel != ""
+    - mas_channel in upgrade_path
+  set_fact:
+    target_mas_channel: "{{ upgrade_path[mas_channel] }}"
+
+- name: "Assert upgrade target is defined"
+  assert:
+    that: target_mas_channel is defined
+    fail_msg: "Unable to determine upgrade target: mas_channel={{ mas_channel | default('<undefined>') }}"
+
+
+# 4. Validate target upgrade channel exists in the package manifest
+# -----------------------------------------------------------------------------
+- name: "Lookup PackageManifest: ibm-mas"
+  kubernetes.core.k8s_info:
+    api_version: v1
+    kind: PackageManifest
+    name: "ibm-mas"
+    namespace: openshift-marketplace
+  register: mas_channel_lookup
+  no_log: true # This generates a huge amount of (useless) logging
+
+- name: Assert that PackageManifest exists
+  ansible.builtin.assert:
+    that:
+      - mas_channel_lookup is defined
+      - mas_channel_lookup.resources is defined
+      - mas_channel_lookup.resources | length == 1
+    fail_msg: "PackageManifest not found: ibm-mas"
+
+- name: Get channels list from PackageManifest
+  ansible.builtin.set_fact:
+    op_channels_in_pm: "{{ mas_channel_lookup.resources[0].status.channels | default([], true) }}"
+
+- name: Find app channel index in channels list
+  ansible.builtin.set_fact:
+    op_channel_idx_in_pm: >-
+      {{ lookup('ansible.utils.index_of',
+                data=op_channels_in_pm,
+                test='eq',
+                value=target_mas_channel,
+                key='name') }}
+
+- name: Set mas_channel to the found channel name
+  ansible.builtin.set_fact:
+    mas_channel: "{{ op_channels_in_pm[op_channel_idx_in_pm | int].name }}"
+  when:
+    - op_channel_idx_in_pm is defined
+    - (op_channel_idx_in_pm | type_debug) != 'list'
+    - (op_channel_idx_in_pm | int(default=-1)) >= 0
+
+- name: Set fallback target channel
+  ansible.builtin.set_fact:
+    fallback_target_channel: "{{ target_mas_channel }}-feature"
+
+- name: Find channel with -feature if not found
+  ansible.builtin.set_fact:
+    op_channel_idx_in_pm_with_feature: >-
+      {{ lookup('ansible.utils.index_of',
+                data=op_channels_in_pm,
+                test='eq',
+                value=fallback_target_channel,
+                key='name') }}
+
+- name: Set mas_channel to the found channel name
+  ansible.builtin.set_fact:
+    mas_channel: "{{ op_channels_in_pm[op_channel_idx_in_pm_with_feature | int].name }}"
+  when:
+    - mas_channel is not defined
+    - op_channel_idx_in_pm_with_feature is defined
+    - (op_channel_idx_in_pm_with_feature | type_debug) != 'list'
+    - (op_channel_idx_in_pm_with_feature | int(default=-1)) >= 0
+
+- name: Raise error if channel not found
+  ansible.builtin.fail:
+    msg: "Upgrade not possible. Channel {{ mas_channel }} not found in PackageManifest."
+  when:
+    - mas_channel is not defined
+
+
+# 5. Provide debug information
+# -----------------------------------------------------------------------------
+- name: "Debug information"
+  debug:
+    msg:
+      - "Target Channel ......................... {{ mas_channel | default('No upgrade available', True) }}"
+      - "MAS Instance ID ........................ {{ mas_instance_id }}"
+      - "MAS namespace .......................... {{ mas_namespace }}"
+      - "Dry Run? ............................... {{ mas_upgrade_dryrun }}"
+
+
+# 6. Check the existing installation
+# -----------------------------------------------------------------------------
+- name: "Check existing MAS installation"
+  when:
+    - mas_channel is defined and mas_channel != ""
+  include_tasks: tasks/check_core_compatibility.yml
+
+
+# 7. Check installed applications are compatible
+# -----------------------------------------------------------------------------
+# 7.1. Assist
+- name: "Check application compatibility for Assist"
+  when:
+    - mas_channel is defined and mas_channel != ""
+    - suite_sub_info is defined and suite_sub_info.resources[0].spec.channel != mas_channel
+  include_tasks: tasks/check_app_compatibility.yml
+  vars:
+    check_app:
+      id: assist
+      kind: AssistApp
+      api_version: apps.mas.ibm.com/v1
+
+# 7.2. IoT
+- name: "Check application compatibility for IoT"
+  when:
+    - mas_channel is defined and mas_channel != ""
+    - suite_sub_info is defined and suite_sub_info.resources[0].spec.channel != mas_channel
+  include_tasks: tasks/check_app_compatibility.yml
+  vars:
+    check_app:
+      id: iot
+      kind: IoT
+      api_version: iot.ibm.com/v1
+
+# 7.3 Manage
+- name: "Check application compatibility for Manage"
+  when:
+    - mas_channel is defined and mas_channel != ""
+    - suite_sub_info is defined and suite_sub_info.resources[0].spec.channel != mas_channel
+  include_tasks: tasks/check_app_compatibility.yml
+  vars:
+    check_app:
+      id: manage
+      kind: ManageApp
+      api_version: apps.mas.ibm.com/v1
+
+# 7.4. Monitor
+- name: "Check application compatibility for Monitor"
+  when:
+    - mas_channel is defined and mas_channel != ""
+    - suite_sub_info is defined and suite_sub_info.resources[0].spec.channel != mas_channel
+  include_tasks: tasks/check_app_compatibility.yml
+  vars:
+    check_app:
+      id: monitor
+      kind: MonitorApp
+      api_version: apps.mas.ibm.com/v1
+
+# 7.5. Predict
+- name: "Check application compatibility for Predict"
+  when:
+    - mas_channel is defined and mas_channel != ""
+    - suite_sub_info is defined and suite_sub_info.resources[0].spec.channel != mas_channel
+  include_tasks: tasks/check_app_compatibility.yml
+  vars:
+    check_app:
+      id: predict
+      kind: PredictApp
+      api_version: apps.mas.ibm.com/v1
+
+# 7.6. Visual Inspection
+- name: "Check application compatibility for Visual Inspection"
+  when:
+    - mas_channel is defined and mas_channel != ""
+    - suite_sub_info is defined and suite_sub_info.resources[0].spec.channel != mas_channel
+  include_tasks: tasks/check_app_compatibility.yml
+  vars:
+    check_app:
+      id: visualinspection
+      kind: VisualInspectionApp
+      api_version: apps.mas.ibm.com/v1
+
+# 7.7. Optimizer
+- name: "Check application compatibility for Optimizer"
+  when:
+    - mas_channel is defined and mas_channel != ""
+    - suite_sub_info is defined and suite_sub_info.resources[0].spec.channel != mas_channel
+  include_tasks: tasks/check_app_compatibility.yml
+  vars:
+    check_app:
+      id: optimizer
+      kind: OptimizerApp
+      api_version: apps.mas.ibm.com/v1
+
+
+# 8. Upgrade
+# -----------------------------------------------------------------------------
+- name: "Execute Channel Upgrade"
+  when:
+    - mas_channel is defined and mas_channel != ""
+    - suite_sub_info is defined and suite_sub_info.resources[0].spec.channel != mas_channel
+    - not mas_upgrade_dryrun
+  include_tasks: tasks/upgrade.yml
+
+- name: "Debug when we are already on the desired channel"
+  when:
+    - mas_channel is defined and mas_channel != ""
+    - suite_sub_info is defined and suite_sub_info.resources[0].spec.channel == mas_channel
+  debug:
+    msg: "No action required, subscription is already on the {{ mas_channel }} channel"
+
+- name: "Debug when no upgrade channel was available"
+  when: mas_channel is not defined or mas_channel == ""
+  debug:
+    msg: "No action required, no upgrade channel is available"

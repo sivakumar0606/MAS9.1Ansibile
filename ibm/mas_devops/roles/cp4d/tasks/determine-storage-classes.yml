@@ -1,0 +1,37 @@
+---
+# 1. Lookup storage class availabiity
+# -----------------------------------------------------------------------------
+- name: "determine-storage-classes : Load default storage class information"
+  include_tasks: "{{ role_path }}/../../common_tasks/default_storage_classes.yml"
+
+# 2. Set default storage classes
+# -----------------------------------------------------------------------------
+- name: "determine-storage-classes : Set default File Storage if not set by user"
+  when:
+    - defaultStorageClasses.success
+    - cpd_primary_storage_class is not defined or cpd_primary_storage_class == ""
+  set_fact:
+    cpd_primary_storage_class: "{{ defaultStorageClasses.rwx }}"
+
+- name: "determine-storage-classes : Set default Block Storage if not set by user"
+  when:
+    - defaultStorageClasses.success
+    - cpd_metadata_storage_class is not defined or cpd_metadata_storage_class == ""
+  set_fact:
+    cpd_metadata_storage_class: "{{ defaultStorageClasses.rwo }}"
+
+- name: "determine-storage-classes : Assert that primary storage class has been defined (RWX)"
+  assert:
+    that: cpd_primary_storage_class is defined and cpd_primary_storage_class != ""
+    fail_msg: "cpd_primary_storage_class must be defined"
+
+- name: "determine-storage-classes : Assert that metadata storage class has been defined (RWO)"
+  assert:
+    that: cpd_metadata_storage_class is defined and cpd_metadata_storage_class != ""
+    fail_msg: "cpd_metadata_storage_class must be defined"
+
+- name: "determine-storage-classes : Debug CP4D storage class configuration"
+  debug:
+    msg:
+      - "Primary Storage class (RWX) ............ {{ cpd_primary_storage_class }}"
+      - "Metadata Storage class (RWO) ........... {{ cpd_metadata_storage_class }}"
