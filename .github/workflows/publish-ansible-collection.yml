@@ -45,9 +45,9 @@ jobs:
           if [ -d "$GITHUB_WORKSPACE/build/bin" ]; then
             chmod u+x $GITHUB_WORKSPACE/build/bin/*.sh
             # Check if .env.sh exists
-            if [ ! -f "$GITHUB_WORKSPACE/build/bin/.env.sh" ]; then
+            if [ ! -f "$GITHUB_WORKSPACE/build/bin/env.sh" ]; then
               echo "Warning: .env.sh not found, creating empty placeholder"
-              touch $GITHUB_WORKSPACE/build/bin/.env.sh
+              touch $GITHUB_WORKSPACE/build/bin/env.sh
             fi
             $GITHUB_WORKSPACE/build/bin/initbuild.sh
             source $GITHUB_WORKSPACE/build/bin/functions.sh
