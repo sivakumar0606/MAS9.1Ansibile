@@ -2,6 +2,7 @@ name: Publish Ansible Collection
 on:
   release:
     types: [ published ]
+  workflow_dispatch:  # Enables "Run workflow" button
 
 jobs:
   ansible-publish:
