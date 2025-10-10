@@ -26,7 +26,7 @@ jobs:
         run: |
           chmod u+x $GITHUB_WORKSPACE/build/bin/*.sh
           $GITHUB_WORKSPACE/build/bin/initbuild.sh
-          source $GITHUB_WORKSPACE/build/bin/.functions.sh
+          source $GITHUB_WORKSPACE/build/bin/functions.sh
           python -m pip install -q ansible==2.10.3 yamllint
 
       # Note: Use "--format standard" to ensure filenames and line numbers are in the output
